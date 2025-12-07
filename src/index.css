@@ -143,6 +143,16 @@ svg > g {
 }
 
 /* ============================================
+   FLAG EMOJI STYLES
+   ============================================ */
+
+.flag-emoji {
+  font-family: 'Noto Color Emoji', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  font-feature-settings: normal;
+}
+
+/* ============================================
    COMPONENT STYLES
    ============================================ */
 

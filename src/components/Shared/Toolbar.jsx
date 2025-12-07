@@ -1,9 +1,9 @@
-import { MousePointer2, MapPin, Key, Info, RotateCcw, Globe, Undo2, Redo2, ChevronUp, GitBranch, Pencil, Hash } from 'lucide-react'
+import { MousePointer2, MapPin, Info, RotateCcw, Globe, Undo2, Redo2, ChevronUp, GitBranch, Pencil, Hash } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from '../../hooks/useTranslation'
 import { languages } from '../../locales/translations'
 
-const Toolbar = ({ currentTool, onToolChange, onShowApiKey, hasApiKey, isDarkMode, onToggleDarkMode, gridZoom, onGridZoomChange, onReset, language, onLanguageChange, lineStyle, onLineStyleChange, onUndo, onRedo, canUndo, canRedo, isMobile, showMobileHeader, onToggleMobileHeader, showStationNumbers, onToggleStationNumbers }) => {
+const Toolbar = ({ currentTool, onToolChange, onShowAbout, isDarkMode, onToggleDarkMode, gridZoom, onGridZoomChange, onReset, language, onLanguageChange, lineStyle, onLineStyleChange, onUndo, onRedo, canUndo, canRedo, isMobile, showMobileHeader, onToggleMobileHeader, showStationNumbers, onToggleStationNumbers }) => {
   const { t } = useTranslation(language)
   const [showLanguageMenu, setShowLanguageMenu] = useState(false)
   const languageMenuRef = useRef(null)
@@ -140,7 +140,7 @@ const Toolbar = ({ currentTool, onToolChange, onShowApiKey, hasApiKey, isDarkMod
             title="Language"
           >
             <Globe size={18} />
-            <span className="text-lg">{languages.find(l => l.code === language)?.flag}</span>
+            <span className="text-lg flag-emoji">{languages.find(l => l.code === language)?.flag}</span>
           </button>
           
            {showLanguageMenu && (
@@ -156,7 +156,7 @@ const Toolbar = ({ currentTool, onToolChange, onShowApiKey, hasApiKey, isDarkMod
                     language === lang.code ? 'bg-blue-50 dark:bg-blue-900/30' : ''
                   }`}
                 >
-                  <span className="text-xl">{lang.flag}</span>
+                  <span className="text-xl flag-emoji">{lang.flag}</span>
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{lang.name}</span>
                 </button>
               ))}
@@ -173,16 +173,12 @@ const Toolbar = ({ currentTool, onToolChange, onShowApiKey, hasApiKey, isDarkMod
         </button>
         
         <button
-          onClick={onShowApiKey}
-          className={`flex items-center gap-2 px-2 md:px-4 py-2 rounded-lg transition-colors ${
-            hasApiKey
-              ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800'
-              : 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-800'
-          }`}
+          onClick={onShowAbout}
+          className="flex items-center gap-2 px-2 md:px-4 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-800/50 transition-colors"
         >
-          <Key size={18} />
+          <Info size={18} />
           <span className="text-sm font-medium">
-            {hasApiKey ? t('apiKeySet') : t('setApiKey')}
+            {t('about')}
           </span>
         </button>
       </div>
@@ -233,12 +229,10 @@ const Toolbar = ({ currentTool, onToolChange, onShowApiKey, hasApiKey, isDarkMod
           </button>
           
           <button
-            onClick={onShowApiKey}
-            className={`flex items-center justify-center w-9 h-9 rounded-lg ${
-              hasApiKey ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
-            }`}
+            onClick={onShowAbout}
+            className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200"
           >
-            <Key size={16} />
+            <Info size={16} />
           </button>
           
           <button

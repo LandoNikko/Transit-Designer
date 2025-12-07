@@ -34,6 +34,7 @@ const AnnouncementPanel = ({
   generatedAudioHistory,
   setGeneratedAudioHistory,
   apiKey, 
+  onShowApiKey = () => {},
   language = 'en', 
   isMobile, 
   onClose,
@@ -86,6 +87,7 @@ const AnnouncementPanel = ({
   const [showSpeedControl, setShowSpeedControl] = useState(false)
   const [showAudioProcessing, setShowAudioProcessing] = useState(false)
   const [hoveredBetweenSlot, setHoveredBetweenSlot] = useState(null)
+  const [stationAudioSlots, setStationAudioSlots] = useState({})
   const [audioDurations, setAudioDurations] = useState({})
   const [audioRemainingTimes, setAudioRemainingTimes] = useState({})
   const [queueProgress, setQueueProgress] = useState(0)
@@ -287,6 +289,15 @@ const AnnouncementPanel = ({
         queue.push(stationSlotId)
       }
       
+      const extraStationSlots = stationAudioSlots[station.id]
+      if (Array.isArray(extraStationSlots)) {
+        extraStationSlots.forEach(slotId => {
+          if (audioAssignments[slotId]?.url) {
+            queue.push(slotId)
+          }
+        })
+      }
+      
       if (index < lineStations.length - 1) {
         const betweenSlotId = `between-${station.id}-${lineStations[index + 1].id}`
         if (audioAssignments[betweenSlotId]?.url) {
@@ -304,7 +315,7 @@ const AnnouncementPanel = ({
       }
     })
     return queue
-  }, [lineStations, audioAssignments, betweenSegments])
+  }, [lineStations, audioAssignments, betweenSegments, stationAudioSlots])
 
   const getTotalDuration = () => {
     let total = 0
@@ -527,6 +538,39 @@ const AnnouncementPanel = ({
     }))
   }
 
+  const addStationAudioSlot = (stationId) => {
+    const slotId = `station-${stationId}-slot-${Date.now()}`
+    setStationAudioSlots(prev => ({
+      ...prev,
+      [stationId]: [...(prev[stationId] || []), slotId]
+    }))
+  }
+
+  const removeStationAudioSlot = (stationId, slotId) => {
+    setStationAudioSlots(prev => ({
+      ...prev,
+      [stationId]: (prev[stationId] || []).filter(id => id !== slotId)
+    }))
+    
+    setAudioAssignments(prev => {
+      const newAssignments = { ...prev }
+      delete newAssignments[slotId]
+      return newAssignments
+    })
+    
+    setAnnouncementTypes(prev => {
+      const newTypes = { ...prev }
+      delete newTypes[slotId]
+      return newTypes
+    })
+    
+    setGeneratedAudioHistory(prev => {
+      const newHistory = { ...prev }
+      delete newHistory[slotId]
+      return newHistory
+    })
+  }
+
   const removeBetweenSegment = (parentSlotId, segmentId) => {
     setBetweenSegments(prev => ({
       ...prev,
@@ -626,7 +670,11 @@ const AnnouncementPanel = ({
   }, [announcementTypes, t])
 
   const handleGenerateAudio = useCallback(async (slotId, stationName) => {
-    if (!apiKey || !aiTextInput.trim()) return
+    if (!aiTextInput.trim()) return
+    if (!apiKey) {
+      onShowApiKey()
+      return
+    }
     
     setIsGeneratingAudio(true)
     try {
@@ -713,7 +761,7 @@ const AnnouncementPanel = ({
     } finally {
       setIsGeneratingAudio(false)
     }
-  }, [apiKey, aiTextInput, aiSelectedVoice, aiGenerationType, loadAudioDuration, availableVoices])
+  }, [apiKey, aiTextInput, aiSelectedVoice, aiGenerationType, loadAudioDuration, availableVoices, onShowApiKey])
 
   const handleSelectPreset = (slotId, preset) => {
     const url = preset.path || preset.url
@@ -1143,11 +1191,541 @@ const AnnouncementPanel = ({
     }
   }, [])
 
-  const renderAudioSlot = (slotId, label, stationId = null, slotIndex = 0, isExtraSegment = false, parentSlotId = null) => {
+  const renderStationCard = (station, stationSlotId, slotIndex) => {
+    const assignment = audioAssignments[stationSlotId]
+    const isPlaying = currentlyPlaying === stationSlotId
+    const isPlayingAndNotPaused = isPlaying && !isPaused
+    const isManuallySelected = station.id === selectedStationId
+    const showHighlight = isPlayingAndNotPaused || (isManuallySelected && !isPlayingAndNotPaused)
+    const extraSlots = stationAudioSlots[station.id] || []
+    const totalSlots = 1 + extraSlots.length
+
+    return (
+      <div 
+        className={`rounded-lg transition-all overflow-visible ${
+          showHighlight ? 'card-selected' : 'card-unselected'
+        }`}
+        onClick={() => handleStationClick(station.id)}
+      >
+        <div className="p-2 space-y-2">
+          {/* Main station slot row */}
+          {renderStationSlotRow(stationSlotId, station.name, station.id, slotIndex, false, 1, totalSlots)}
+          
+          {/* Extra station audio slots */}
+          {extraSlots.map((extraSlotId, idx) => (
+            <div key={extraSlotId}>
+              {renderStationSlotRow(extraSlotId, station.name, station.id, slotIndex, true, idx + 2, totalSlots)}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const renderStationSlotRow = (slotId, label, stationId, slotIndex, isExtraSlot, currentSlotNumber, totalSlots) => {
     const assignment = audioAssignments[slotId]
     const isPlaying = currentlyPlaying === slotId
     const isPlayingAndNotPaused = isPlaying && !isPaused
-    const isStation = !slotId.startsWith('between') && !isExtraSegment
+    const isDropdownOpen = openDropdowns[slotId]
+    const isAIConfigOpen = showAIConfig === slotId
+    const isTypeDropdownOpen = openDropdowns[`${slotId}-type`]
+    const isLastSlot = currentSlotNumber === totalSlots
+
+    return (
+      <div>
+        {/* Top row: Icon/Number, Label, Remove button, Duration */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            {/* Icon/Number space */}
+            <div className="w-5 flex items-center justify-center flex-shrink-0">
+              {showStationNumbers && !isExtraSlot ? (
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                  {slotIndex / 2 + 1}
+                </span>
+              ) : (
+                <div className="relative" ref={el => dropdownRefs.current[`${slotId}-type`] = el}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleDropdown(`${slotId}-type`)
+                    }}
+                    className="flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-600 rounded p-0.5 transition-colors"
+                  >
+                    {getAnnouncementIcon(slotId, 'station', lineColor)}
+                  </button>
+                  
+                  {isTypeDropdownOpen && (
+                    <div className="absolute left-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1 min-w-[160px]">
+                      <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider pointer-events-none">
+                        {t('stationTypes')}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'station')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <MapPin size={14} className="text-blue-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('station')}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'centralStation')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <Building2 size={14} className="text-purple-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('centralStation')}</span>
+                      </button>
+                      <div className="border-t border-gray-200 dark:border-gray-600 my-1"></div>
+                      <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider pointer-events-none">
+                        {t('announcements')}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'arrival')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <ArrowDown size={14} className="text-green-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('arrival')}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'departure')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <TrainFront size={14} className="text-orange-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('departure')}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'transfer')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <GitCommitVertical size={14} className="text-purple-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('transfer')}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'information')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <Info size={14} className="text-cyan-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('information')}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'live')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <MessageSquare size={14} className="text-pink-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('live')}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'warning')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <AlertTriangle size={14} className="text-red-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('warning')}</span>
+                      </button>
+                      <div className="border-t border-gray-200 dark:border-gray-600 my-1"></div>
+                      <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider pointer-events-none">
+                        {t('misc')}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'chime')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <Bell size={14} className="text-yellow-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('chime')}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'music')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <Music size={14} className="text-pink-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('music')}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTypeChange(slotId, 'ambience')
+                          setOpenDropdowns({})
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm"
+                      >
+                        <Radio size={14} className="text-indigo-500" />
+                        <span className="text-gray-700 dark:text-gray-300">{t('ambience')}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            <span className="font-medium text-sm text-gray-800 dark:text-gray-200 flex-shrink-0">{label}</span>
+            
+            {/* Remove button for extra slots */}
+            {isExtraSlot && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeStationAudioSlot(stationId, slotId)
+                }}
+                className="p-1 hover:bg-red-100 dark:hover:bg-red-900/20 rounded transition-colors flex-shrink-0"
+                title={t('removeSegment')}
+              >
+                <X size={12} className="text-red-500" />
+              </button>
+            )}
+          </div>
+          
+          {/* Duration counter - aligned right */}
+          {assignment && audioDurations[slotId] && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 flex-shrink-0 font-medium">
+              {audioRemainingTimes[slotId] !== undefined 
+                ? formatTime(audioRemainingTimes[slotId])
+                : formatTime(audioDurations[slotId])
+              }
+            </span>
+          )}
+        </div>
+
+        {/* Bottom row: Waveform/Plus icon, Audio dropdown, and play button */}
+        <div className="flex items-center gap-2">
+          {/* Waveform when playing, Plus icon on last slot when selected, or empty space */}
+          <div className="w-8 flex items-center justify-center flex-shrink-0">
+            {isPlayingAndNotPaused ? (
+              <div className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500 text-white rounded">
+                <SoundWave />
+              </div>
+            ) : isLastSlot && selectedStationId === stationId ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  addStationAudioSlot(stationId)
+                }}
+                className="p-1.5 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                title={t('addSegment')}
+              >
+                <Plus size={16} className="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400" />
+              </button>
+            ) : null}
+          </div>
+          
+          <div className="flex-1 min-w-0 relative" ref={el => dropdownRefs.current[slotId] = el}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleDropdown(slotId)
+              }}
+              className="w-full flex items-center justify-between gap-2 px-2 py-1.5 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm transition-colors"
+            >
+              <span className="truncate text-gray-700 dark:text-gray-300">
+                {assignment ? getLocalizedAudioName(assignment, slotId) : t('selectAudio')}
+              </span>
+              {isDropdownOpen ? (
+                <ChevronUp size={14} className="flex-shrink-0 text-gray-500" />
+              ) : (
+                <ChevronDown size={14} className="flex-shrink-0 text-gray-500" />
+              )}
+            </button>
+
+            {/* Dropdown content */}
+            {isDropdownOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+                <input
+                  ref={el => fileInputRefs.current[slotId] = el}
+                  type="file"
+                  accept="audio/*"
+                  onChange={(e) => handleFileUpload(slotId, e)}
+                  className="hidden"
+                />
+                
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    fileInputRefs.current[slotId]?.click()
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700"
+                >
+                  <span className="text-blue-600 dark:text-blue-400">+</span>
+                  <span>{t('uploadAudio')}</span>
+                </button>
+                
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleShowAIConfig(slotId, label)
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="text-blue-600 dark:text-blue-400">+</span>
+                  <span>{t('generateWithAI')}</span>
+                </button>
+
+                <div className="py-1">
+                  {uploadedAudios.map((uploaded) => (
+                    <button
+                      key={uploaded.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleSelectPreset(slotId, { path: uploaded.url, name: uploaded.name })
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm text-gray-700 dark:text-gray-300"
+                    >
+                      <span className="truncate">{uploaded.name}</span>
+                    </button>
+                  ))}
+                  {getAllPresets(language).map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleSelectPreset(slotId, preset)
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm text-gray-700 dark:text-gray-300"
+                    >
+                      <span className="truncate">{preset.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Play button */}
+          {assignment && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handlePlayAudio(slotId)
+              }}
+              className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex-shrink-0"
+              title={t('playAudio')}
+            >
+              {isPlayingAndNotPaused ? (
+                <Pause size={16} className="text-blue-500" />
+              ) : (
+                <Play size={16} className="text-gray-600 dark:text-gray-400" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {isAIConfigOpen && (
+          <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 max-w-full overflow-visible">
+            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-3">AI Generation</p>
+            
+            {!apiKey && (
+              <div className="mb-3 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700 rounded-lg">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-orange-700 dark:text-orange-300">{t('setApiKey')}</p>
+                    <p className="text-xs text-orange-700/90 dark:text-orange-200 mt-1">{t('setApiKeyToGenerate')}</p>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onShowApiKey()
+                    }}
+                    className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md text-xs font-semibold transition-colors"
+                  >
+                    {t('setApiKey')}
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {/* Generation Type Radio Buttons */}
+            <div className="space-y-2 mb-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="generationType"
+                  value="text-to-speech"
+                  checked={aiGenerationType === 'text-to-speech'}
+                  onChange={(e) => setAiGenerationType(e.target.value)}
+                  className="w-4 h-4 text-blue-600"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">Text-to-Speech</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="generationType"
+                  value="sound-effects"
+                  checked={aiGenerationType === 'sound-effects'}
+                  onChange={(e) => setAiGenerationType(e.target.value)}
+                  className="w-4 h-4 text-blue-600"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">Sound Effects</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-not-allowed opacity-50">
+                <input
+                  type="radio"
+                  name="generationType"
+                  value="music"
+                  disabled
+                  className="w-4 h-4 text-blue-600"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">Music (Coming Soon)</span>
+              </label>
+            </div>
+
+            {/* Text-to-Speech Form */}
+            {aiGenerationType === 'text-to-speech' && (
+              <div className="space-y-3 max-w-full">
+                <div className="relative" ref={voiceDropdownRef}>
+                  <label className="text-xs text-gray-600 dark:text-gray-400 mb-1 block">Voice</label>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setVoiceDropdownOpen(!voiceDropdownOpen)
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+                  >
+                    <span className="text-sm text-gray-800 dark:text-gray-200">
+                      {availableVoices.find(v => v.id === aiSelectedVoice)?.name || 'Select a voice'}
+                    </span>
+                    {voiceDropdownOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
+
+                  {voiceDropdownOpen && (
+                    <div className="absolute left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+                      {availableVoices.map(voice => (
+                        <button
+                          key={voice.id}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setAiSelectedVoice(voice.id)
+                            setVoiceDropdownOpen(false)
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm text-gray-700 dark:text-gray-300"
+                        >
+                          <span>{voice.name}</span>
+                          {voice.preview && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                playVoicePreview(voice.preview, voice.id)
+                              }}
+                              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              {voicePreviewPlaying === voice.id ? 'Stop' : 'Preview'}
+                            </button>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-600 dark:text-gray-400 mb-1 block">Text</label>
+                  <textarea
+                    value={aiTextInput}
+                    onChange={(e) => setAiTextInput(e.target.value)}
+                    placeholder={t('presetInformation')}
+                    rows="3"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Sound Effects Form */}
+            {aiGenerationType === 'sound-effects' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-gray-600 dark:text-gray-400 mb-1 block">Description</label>
+                  <textarea
+                    value={aiTextInput}
+                    onChange={(e) => setAiTextInput(e.target.value)}
+                    placeholder="e.g. futuristic train door chime, calm, short"
+                    rows="3"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                    Generate 4 variations with ElevenLabs Sound Effects.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleGenerateAudio(slotId, label)
+                }}
+                disabled={isGeneratingAudio || !aiTextInput.trim()}
+                className="flex-1 px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isGeneratingAudio ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Generating...</span>
+                  </>
+                ) : (
+                  'Generate'
+                )}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowAIConfig(null)
+                  setAiTextInput('')
+                }}
+                disabled={isGeneratingAudio}
+                className="px-3 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded text-sm transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const renderAudioSlot = (slotId, label, stationId = null, slotIndex = 0, isExtraSegment = false, parentSlotId = null, isExtraStationSlot = false) => {
+    const assignment = audioAssignments[slotId]
+    const isPlaying = currentlyPlaying === slotId
+    const isPlayingAndNotPaused = isPlaying && !isPaused
+    const isStation = !slotId.startsWith('between') && !isExtraSegment && !isExtraStationSlot
     const isManuallySelected = isStation && stationId && stationId === selectedStationId
     const isDropdownOpen = openDropdowns[slotId]
     const isAIConfigOpen = showAIConfig === slotId
@@ -1346,13 +1924,15 @@ const AnnouncementPanel = ({
               
               <span className="font-medium text-sm text-gray-800 dark:text-gray-200 flex-shrink-0">{label}</span>
               
-              {/* Remove button for extra segments or main between slots */}
-              {((isExtraSegment && parentSlotId) || (!isStation && !isExtraSegment && assignment)) && (
+              {/* Remove button for extra segments, extra station slots, or main between slots */}
+              {((isExtraSegment && parentSlotId) || (isExtraStationSlot && stationId) || (!isStation && !isExtraSegment && !isExtraStationSlot && assignment)) && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
                     if (isExtraSegment && parentSlotId) {
                       removeBetweenSegment(parentSlotId, slotId)
+                    } else if (isExtraStationSlot && stationId) {
+                      removeStationAudioSlot(stationId, slotId)
                     } else {
                       removeMainBetweenSlot(slotId)
                     }
@@ -1431,11 +2011,10 @@ const AnnouncementPanel = ({
                     e.stopPropagation()
                       handleShowAIConfig(slotId, label)
                   }}
-                  disabled={!apiKey}
                     className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left text-sm text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <span className="text-blue-600 dark:text-blue-400">+</span>
-                    <span>Generate with AI</span>
+                    <span>{t('generateWithAI')}</span>
                 </button>
 
                   <div className="py-1">
@@ -1489,6 +2068,26 @@ const AnnouncementPanel = ({
           {isAIConfigOpen && (
             <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 max-w-full overflow-visible">
               <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-3">AI Generation</p>
+              
+              {!apiKey && (
+                <div className="mb-3 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700 rounded-lg">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-orange-700 dark:text-orange-300">{t('setApiKey')}</p>
+                      <p className="text-xs text-orange-700/90 dark:text-orange-200 mt-1">{t('setApiKeyToGenerate')}</p>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onShowApiKey()
+                      }}
+                      className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md text-xs font-semibold transition-colors"
+                    >
+                      {t('setApiKey')}
+                    </button>
+                  </div>
+                </div>
+              )}
               
               {/* Generation Type Radio Buttons */}
               <div className="space-y-2 mb-3">
@@ -2246,9 +2845,6 @@ const AnnouncementPanel = ({
           </>
         )}
 
-        {!apiKey && lines.length > 0 && (
-          <p className="text-xs text-orange-600 dark:text-orange-400 mt-1.5">{t('setApiKeyToGenerate')}</p>
-        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
@@ -2308,12 +2904,7 @@ const AnnouncementPanel = ({
                       
                       {/* Station slot box */}
                       <div className="flex-1 min-w-0">
-                  {renderAudioSlot(
-                          stationSlotId,
-                          station.name,
-                    station.id,
-                    slotIndex
-                  )}
+                        {renderStationCard(station, stationSlotId, slotIndex)}
                       </div>
                     </div>
                   

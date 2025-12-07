@@ -3,6 +3,7 @@ import MapEditor from './components/MapEditor/MapEditor'
 import AnnouncementPanel from './components/AnnouncementEditor/AnnouncementPanel'
 import Toolbar from './components/Shared/Toolbar'
 import APIKeyInput from './components/Shared/APIKeyInput'
+import AboutModal from './components/Shared/AboutModal'
 import PresetSidebar from './components/Shared/PresetSidebar'
 import CreateLineModal from './components/Shared/CreateLineModal'
 import { trainPresets } from './data/presets'
@@ -21,6 +22,7 @@ function App() {
   const [selectedStations, setSelectedStations] = useState([])
   const [apiKey, setApiKey] = useState(sessionStorage.getItem('elevenLabsApiKey') || '')
   const [showApiKeyInput, setShowApiKeyInput] = useState(false)
+  const [showAboutModal, setShowAboutModal] = useState(false)
   const [currentPresetId, setCurrentPresetId] = useState(null)
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('darkMode')
@@ -529,8 +531,7 @@ function App() {
         <Toolbar 
           currentTool={currentTool}
           onToolChange={setCurrentTool}
-          onShowApiKey={() => setShowApiKeyInput(true)}
-          hasApiKey={!!apiKey}
+          onShowAbout={() => setShowAboutModal(true)}
           isDarkMode={isDarkMode}
           onToggleDarkMode={toggleDarkMode}
           gridZoom={gridZoom}
@@ -557,6 +558,13 @@ function App() {
           onSave={handleApiKeySave}
           onClose={() => setShowApiKeyInput(false)}
           initialKey={apiKey}
+          language={language}
+        />
+      )}
+      
+      {showAboutModal && (
+        <AboutModal
+          onClose={() => setShowAboutModal(false)}
           language={language}
         />
       )}
@@ -665,6 +673,7 @@ function App() {
               generatedAudioHistory={generatedAudioHistory}
               setGeneratedAudioHistory={updateGeneratedAudioHistory}
               apiKey={apiKey}
+              onShowApiKey={() => setShowApiKeyInput(true)}
               language={language}
               isMobile={isMobile}
               onClose={() => setShowMobileAnnouncements(false)}
